@@ -1,856 +1,567 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
+import { 
+  Image as ImageIcon, Sparkles, Download, RefreshCw, 
+  Star, GraduationCap, Trophy, Mic, Languages, Clock
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
-import { 
-  PenTool, 
-  User, 
-  GraduationCap, 
-  Calendar, 
-  BookOpen, 
-  Upload, 
-  Send, 
-  ArrowLeft, 
-  Printer, 
-  CheckCircle2, 
-  AlertCircle,
-  Loader2,
-  Trophy,
-  Activity,
-  FileText,
-  Target,
-  ShieldCheck,
-  Languages,
-  GitMerge,
-  SpellCheck,
-  Settings,
-  Key,
-  ExternalLink,
-  Image as ImageIcon
-} from 'lucide-react';
-import { gradeEssay, GradingResult, EssayError, ocrImage } from './services/geminiService.ts';
+import { generateContent, generateAudio, generateExercise } from './services/geminiService';
+import { EnglishLevel, ContentMode, VocabularyItem, ExerciseData } from './types';
 
-// --- Types ---
-interface StudentInfo {
-  center: string;
-  teacher: string;
-  name: string;
-  class: string;
-  date: string;
-  level: string;
-  topic: string;
-}
+// Components
+import { Header } from './components/Header';
+import { BrandLogo } from './components/BrandLogo';
+import { ApiKeyModal } from './components/ApiKeyModal';
+import { InputPanel } from './components/InputPanel';
+import { PosterPreview } from './components/PosterPreview';
+import { SpeechEvaluator } from './components/SpeechEvaluator';
+import { CertificateModal } from './components/CertificateModal';
+import { Footer } from './components/Footer';
+import { LessonHistory } from './components/LessonHistory';
+import { ExerciseSection } from './components/ExerciseSection';
 
-// --- Components ---
-
-const GradePill = ({ score }: { score: number }) => {
-  let color = 'bg-red-100 text-red-700 border-red-200';
-  let label = 'Chưa đạt'; // Below 5.0
-  
-  if (score >= 9.0) {
-    color = 'bg-emerald-100 text-emerald-700 border-emerald-200';
-    label = 'Giỏi (Excellent)';
-  } else if (score >= 7.5) {
-    color = 'bg-blue-100 text-blue-700 border-blue-200';
-    label = 'Khá (Good)';
-  } else if (score >= 5.0) {
-    color = 'bg-amber-100 text-amber-700 border-amber-200';
-    label = 'Trung bình (Average)';
-  }
-
-  return (
-    <span className={`px-3 py-1 rounded-full text-xs uppercase font-bold border tracking-wider ${color}`}>
-      {label}
-    </span>
-  );
-};
-
-const SectionHeader = ({ icon: Icon, title }: { icon: any, title: string }) => (
-  <div className="flex items-center gap-2 mb-4 mt-6 first:mt-0">
-    <div className="p-1.5 rounded-lg bg-brand-green/10 text-brand-green">
-      <Icon size={16} />
-    </div>
-    <h3 className="text-xs font-black uppercase tracking-widest text-slate-700 flex-1 flex items-center gap-3">
-      {title}
-      <div className="h-px bg-slate-300 flex-1" />
-    </h3>
-  </div>
-);
-
-const EssayCorrector = ({ essay, errors }: { essay: string, errors: EssayError[] }) => {
-  if (!errors || errors.length === 0) {
-    return <p className="text-slate-700 leading-relaxed font-medium">{essay}</p>;
-  }
-
-  // Sort errors by length descending to avoid replacing sub-strings of other errors first
-  const sortedErrors = [...errors].sort((a, b) => b.original.length - a.original.length);
-  
-  let content: (string | React.ReactNode)[] = [essay];
-
-  sortedErrors.forEach((err, errIdx) => {
-    const newContent: (string | React.ReactNode)[] = [];
-    
-    content.forEach((segment) => {
-      if (typeof segment !== 'string') {
-        newContent.push(segment);
-        return;
-      }
-
-      const parts = segment.split(err.original);
-      if (parts.length === 1) {
-        newContent.push(segment);
-      } else {
-        parts.forEach((part, i) => {
-          newContent.push(part);
-          if (i < parts.length - 1) {
-            newContent.push(
-              <span key={`${errIdx}-${i}`} className="relative group/err inline-block cursor-help">
-                <del className="text-red-500 bg-red-50 px-1 rounded-sm decoration-red-500/50 decoration-2 transition-colors">
-                  {err.original}
-                </del>
-                <ins className="no-underline text-emerald-600 font-bold ml-1">
-                  {err.correction}
-                </ins>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-xl opacity-0 invisible group-hover/err:opacity-100 group-hover/err:visible transition-all z-20 pointer-events-none text-center leading-tight font-medium">
-                  {err.explanation}
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-800" />
-                </div>
-              </span>
-            );
-          }
-        });
-      }
-    });
-    content = newContent;
-  });
-
-  return (
-    <div className="text-slate-800 leading-loose font-medium space-y-4">
-      {content}
-    </div>
-  );
-};
-
-const ScoreBox = ({ label, score, max = 2.0 }: { label: string, score: number, max?: number }) => (
-  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
-    <div className="text-xs text-slate-700 font-black mb-1 uppercase tracking-wider">{label}</div>
-    <div className="flex items-baseline justify-center gap-0.5">
-      <span className="text-2xl font-serif font-black text-slate-900">{score.toFixed(1)}</span>
-      <span className="text-xs text-slate-500 font-bold">/{max.toFixed(1)}</span>
-    </div>
-  </div>
-);
+// Hooks
+import { useFileProcessor } from './hooks/useFileProcessor';
+import { useAudioPlayer } from './hooks/useAudioPlayer';
+import { useRecorder } from './hooks/useRecorder';
+import { useLessonHistory, LessonRecord } from './hooks/useLessonHistory';
 
 export default function App() {
-  const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [result, setResult] = useState<GradingResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [essay, setEssay] = useState('');
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [tempKey, setTempKey] = useState('');
+  // Core state
+  const [topic, setTopic] = useState('');
+  const [level, setLevel] = useState<EnglishLevel>("Starters");
+  const [apiKey, setApiKey] = useState(localStorage.getItem("GEMINI_API_KEY") || "");
   
-  const resultRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasEnvKey = React.useMemo(() => {
+    const envKey = process.env.GEMINI_API_KEY;
+    return !!(
+      envKey &&
+      envKey.toUpperCase() !== "UNDEFINED" &&
+      envKey.toUpperCase() !== "NULL" &&
+      envKey !== "MY_GEMINI_API_KEY" &&
+      envKey.trim() !== ""
+    );
+  }, []);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [contentMode, setContentMode] = useState<ContentMode>("generate");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!apiKey) {
-      setShowKeyModal(true);
+  // Generated content
+  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
+  const [readingText, setReadingText] = useState<string | null>(null);
+  const [translationText, setTranslationText] = useState<string | null>(null);
+  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
+  const [showTranslation, setShowTranslation] = useState(false);
+  const [generatedTopicName, setGeneratedTopicName] = useState<string | null>(null);
+  const [exerciseData, setExerciseData] = useState<ExerciseData | null>(null);
+  const [exerciseScore, setExerciseScore] = useState<number | null>(null);
+
+  // UI state
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [studentName, setStudentName] = useState('');
+  const [teacherName, setTeacherName] = useState('Nextgen English');
+  const [showCertificate, setShowCertificate] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [currentLessonId, setCurrentLessonId] = useState<string | null>(null);
+  const posterRef = useRef<HTMLDivElement>(null);
+
+  // Custom hooks
+  const fileProcessor = useFileProcessor(setTopic, setImagePreview, setContentMode, setError, contentMode);
+  const audioPlayer = useAudioPlayer(readingText, level, setError);
+  const recorder = useRecorder(readingText, level, setError);
+  const lessonHistory = useLessonHistory();
+
+  // API Key check on mount
+  React.useEffect(() => {
+    if (!apiKey && !hasEnvKey) {
+      setShowApiKeyModal(true);
     }
+  }, [apiKey, hasEnvKey]);
+
+  // Save score to history when evaluation completes
+  React.useEffect(() => {
+    if (recorder.evaluation && recorder.evaluation.isComplete && currentLessonId && recorder.evaluation.score > 0) {
+      lessonHistory.updateScore(currentLessonId, recorder.evaluation.score);
+    }
+  }, [recorder.evaluation]);
+
+  const handleUpdateApiKey = useCallback((newKey: string) => {
+    setApiKey(newKey);
+    localStorage.setItem("GEMINI_API_KEY", newKey);
+    setShowApiKeyModal(false);
+    setError(null);
   }, []);
 
-  const handleSaveKey = (key: string) => {
-    const trimmed = key.trim();
-    if (trimmed) {
-      localStorage.setItem('GEMINI_API_KEY', trimmed);
-      setApiKey(trimmed);
-      setShowKeyModal(false);
+  const handleGenerate = useCallback(async () => {
+    if (!topic && !imagePreview) {
+      setError("Vui lòng nhập chủ đề hoặc tải ảnh lên.");
+      return;
     }
-  };
-  const [studentInfo, setStudentInfo] = useState<StudentInfo>({
-    center: 'NEXTGEN ENGLISH',
-    teacher: 'Nextgen Academic Team',
-    name: '',
-    class: '',
-    date: new Date().toLocaleDateString('vi-VN'),
-    level: 'A2',
-    topic: ''
-  });
 
-  const handleGrade = async () => {
-    if (!apiKey) {
-      setShowKeyModal(true);
-      return;
-    }
-    if (!essay.trim()) {
-      setError("Vui lòng nhập bài viết của học sinh.");
-      return;
-    }
+    setIsGenerating(true);
     setError(null);
-    setLoading(true);
-    try {
-      const res = await gradeEssay(essay, studentInfo.level, apiKey, studentInfo.topic);
-      setResult(res);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (err: any) {
-      setError(err.message || "Đã có lỗi xảy ra khi chấm bài.");
-    } finally {
-      setLoading(false);
-    }
-  };
+    setReadingText(null);
 
-  const exportImage = async () => {
-    if (resultRef.current === null) return;
-    
-    setExporting(true);
     try {
-      // Small delay to ensure all animations settled
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 1. Generate content
+      const { prompt, readingText: text, topicName, translation, vocabulary: vocab } = await generateContent(
+        topic || (contentMode === "useInput" ? "Extract text from image" : "A scene based on the provided image"), 
+        level, contentMode, imagePreview || undefined
+      );
+      setGeneratedPrompt(prompt);
+      setReadingText(text);
+      setTranslationText(translation);
+      setVocabulary(vocab);
+      setGeneratedTopicName(topicName);
+      setShowTranslation(false);
+      audioPlayer.setAudioUrl(null);
+      recorder.setEvaluation(null);
+
+      // 2. Generate exercises (with a short delay to avoid quota limits on free-tier keys)
+      await new Promise(r => setTimeout(r, 2000));
+      const exData = text ? await generateExercise(text, level).catch(err => {
+        console.error("Exercise generation failed", err);
+        return null;
+      }) : null;
       
-      const canvas = await html2canvas(resultRef.current, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        useCORS: true,
-        allowTaint: false,
-        scrollX: 0,
-        scrollY: 0,
-        logging: true,
-        width: resultRef.current.offsetWidth,
-        height: resultRef.current.offsetHeight
+      setExerciseData(exData);
+      setExerciseScore(null);
+
+      // 3. Then generate audio (or fallback to TTS)
+      audioPlayer.setIsAudioLoading(true);
+      const audioUrl = text ? await generateAudio(text, level).catch(err => {
+        console.error("Background audio generation failed", err);
+        const msg = err?.message || "";
+        if (msg === "QUOTA_EXCEEDED" || msg === "INVALID_KEY") throw err;
+        return null;
+      }) : null;
+      
+      if (audioUrl) audioPlayer.setAudioUrl(audioUrl);
+      audioPlayer.setIsAudioLoading(false);
+
+      // 3. Save to lesson history
+      const lessonId = lessonHistory.addLesson({
+        topicName: topicName,
+        level,
+        readingText: text,
+        translationText: translation,
+        vocabulary: vocab,
+        generatedImage: null,
+        generatedPrompt: prompt,
+        exerciseData: exData,
       });
-      
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          throw new Error('Canvas to Blob failed');
+      setCurrentLessonId(lessonId);
+
+    } catch (err: any) {
+      console.error(err);
+      const errorMessage = err?.message || String(err);
+      if (errorMessage === "QUOTA_EXCEEDED") {
+        setError("Bạn đã hết hạn mức sử dụng (Quota) của API Key này. Vui lòng nhấn vào nút 'Cài đặt API Key' để đổi key mới hoặc thử lại sau.");
+      } else if (errorMessage === "INVALID_KEY") {
+        setError("API Key không hợp lệ hoặc đã bị vô hiệu hóa. Vui lòng kiểm tra lại trong phần 'Cài đặt API Key'.");
+      } else if (errorMessage.includes("safety") || errorMessage.includes("Safety")) {
+        setError("Nội dung hoặc hình ảnh bị chặn bởi bộ lọc an toàn. Vui lòng thử chủ đề khác.");
+      } else if (errorMessage.includes("parsing") || errorMessage.includes("parse")) {
+        setError("Lỗi xử lý dữ liệu từ AI. Vui lòng thử lại.");
+      } else {
+        let treatedAsQuota = false;
+        try {
+          const parsedError = JSON.parse(errorMessage);
+          if (parsedError?.error?.code === 429 || parsedError?.status === 429) {
+            setError("Bạn đã hết hạn mức sử dụng (Quota). Vui lòng nhấn vào nút 'Cài đặt API Key' để đổi key mới.");
+            treatedAsQuota = true;
+          }
+        } catch (e) { 
+          if (errorMessage.includes('"code":429') || errorMessage.includes('"code": 429')) {
+            setError("Bạn đã hết hạn mức sử dụng (Quota). Vui lòng nhấn vào nút 'Cài đặt API Key' để đổi key mới.");
+            treatedAsQuota = true;
+          }
         }
-        const dataUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const safeName = (studentInfo.name || 'HocSinh').replace(/[^a-z0-9]/gi, '_').toLowerCase();
-        link.download = `PhieuCham_${safeName}.png`;
-        link.href = dataUrl;
-        link.click();
-        
-        // Cleanup
-        setTimeout(() => URL.revokeObjectURL(dataUrl), 100);
-      }, 'image/png');
-    } catch (err) {
-      console.error('Export failed', err);
-      alert('Không thể xuất ảnh. Vui lòng thử lại.');
+        if (!treatedAsQuota) {
+          setError(`Lỗi: ${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}. (Vui lòng thử lại hoặc kiểm tra kết nối mạng)`);
+        }
+      }
+      audioPlayer.setIsAudioLoading(false);
     } finally {
-      setExporting(false);
+      setIsGenerating(false);
     }
-  };
+  }, [topic, imagePreview, contentMode, level, audioPlayer, recorder, lessonHistory]);
 
-  const reset = () => {
-    setResult(null);
-    setEssay('');
+  const handleRetry = useCallback(() => {
     setError(null);
-  };
+    handleGenerate();
+  }, [handleGenerate]);
 
-  const handleOcr = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleLoadLesson = useCallback((lesson: LessonRecord) => {
+    setReadingText(lesson.readingText);
+    setTranslationText(lesson.translationText);
+    setVocabulary(lesson.vocabulary || []);
+    setGeneratedTopicName(lesson.topicName);
+    setGeneratedPrompt(lesson.generatedPrompt);
+    setExerciseData(lesson.exerciseData || null);
+    setExerciseScore(lesson.exerciseScore ?? null);
+    setLevel(lesson.level);
+    setShowTranslation(false);
+    setCurrentLessonId(lesson.id);
+    audioPlayer.setAudioUrl(null);
+    recorder.setEvaluation(null);
+    setError(null);
+  }, [audioPlayer, recorder]);
 
-    if (!apiKey) {
-      setShowKeyModal(true);
-      return;
+  const handleExerciseComplete = useCallback((score: number) => {
+    setExerciseScore(score);
+    if (currentLessonId) {
+      lessonHistory.updateExerciseScore(currentLessonId, score);
     }
+  }, [currentLessonId, lessonHistory]);
 
-    setOcrLoading(true);
-    setError(null);
+  const downloadPoster = useCallback(async () => {
+    if (!posterRef.current || isDownloading) return;
+    setIsDownloading(true);
+    
+    const images = posterRef.current.querySelectorAll('img');
+    const originalSrcs = new Map<HTMLImageElement, string>();
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64Data = (event.target?.result as string).split(',')[1];
-        try {
-          const text = await ocrImage(base64Data, file.type, apiKey);
-          if (text) {
-            setEssay(prev => prev ? prev + "\n" + text : text);
-          }
-        } catch (err: any) {
-          setError(err.message);
-        } finally {
-          setOcrLoading(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setError("Không thể đọc file ảnh.");
-      setOcrLoading(false);
-    }
-  };
+      // 1. Convert all images to base64 to prevent canvas tainting on Vercel
+      const loadPromises = Array.from(images).map(async (img) => {
+        const image = img as HTMLImageElement;
+        const originalSrc = image.src;
+        
+        if (!originalSrc.startsWith('data:')) {
+          originalSrcs.set(image, originalSrc);
+          try {
+            // Attempt to fetch the image and convert to base64
+            // We use a proxy as a fallback if the direct fetch fails due to CORS
+            let blob: Blob;
+            try {
+              const res = await fetch(originalSrc);
+              if (!res.ok) throw new Error("Direct fetch failed");
+              blob = await res.blob();
+            } catch (e) {
+              const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(originalSrc)}`;
+              const res = await fetch(proxyUrl);
+              blob = await res.blob();
+            }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
-        <motion.div 
-          animate={{ rotate: 360 }}
-          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-          className="mb-6 text-brand-green"
-        >
-          <Activity size={48} />
-        </motion.div>
-        <h2 className="text-2xl font-serif font-bold text-slate-900 mb-2 animate-pulse">WriteScore AI đang phân tích...</h2>
-        <p className="text-slate-500 max-w-sm">
-          Đang đánh giá 5 tiêu chí CEFR, trình độ thực tế và gợi ý lộ trình nâng cao trình độ cho học sinh.
-        </p>
-      </div>
-    );
-  }
+            const base64 = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            image.src = base64;
+          } catch (e) {
+            console.warn("Failed to convert image to base64", e);
+            // Ignore error, html2canvas will just try to use the original src
+          }
+        }
+
+        if (image.complete) return Promise.resolve();
+        return new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+      });
+
+      await Promise.all(loadPromises);
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 2. Generate the canvas
+      const canvas = await html2canvas(posterRef.current, {
+        useCORS: true, 
+        allowTaint: false, // Critical: prevent taint to avoid SecurityError on toDataURL
+        scale: 2,
+        backgroundColor: '#ffffff', logging: true, imageTimeout: 15000, removeContainer: true,
+        onclone: (clonedDoc) => {
+          const container = clonedDoc.querySelector('[data-poster-container]') as HTMLElement;
+          if (container) { container.style.backgroundImage = 'none'; container.style.boxShadow = 'none'; container.style.transform = 'none'; container.style.transition = 'none'; }
+          const blurredElements = clonedDoc.querySelectorAll('.backdrop-blur-sm, .backdrop-blur-md, .backdrop-blur-lg');
+          blurredElements.forEach((el: any) => { el.style.backdropFilter = 'none'; el.style.background = 'rgba(255, 255, 255, 0.9)'; });
+          const style = clonedDoc.createElement('style');
+          style.innerHTML = `* { -webkit-print-color-adjust: exact !important; color-adjust: exact !important; print-color-adjust: exact !important; box-shadow: none !important; text-shadow: none !important; }`;
+          clonedDoc.head.appendChild(style);
+        },
+        ignoreElements: (element) => element.hasAttribute('data-html2canvas-ignore'),
+      });
+
+      // 3. Download
+      const dataUrl = canvas.toDataURL('image/png', 1.0);
+      const link = document.createElement('a');
+      link.style.display = 'none'; link.href = dataUrl;
+      link.download = `Nextgen-English-Poster-${Date.now()}.png`;
+      document.body.appendChild(link); link.click();
+      setTimeout(() => { if (link.parentNode) document.body.removeChild(link); }, 500);
+    } catch (err: any) {
+      console.error("Critical: Failed to download poster", err);
+      const msg = err?.message || "";
+      if (msg.includes("tainted") || msg.includes("CORS") || msg.includes("insecure") || msg.includes("toDataURL")) {
+        setError("Lỗi bản quyền hình ảnh (CORS). Vui lòng thử lại hoặc chụp màn hình kết quả.");
+      } else {
+        setError("Không thể tải poster tự động. Bạn vui lòng chụp màn hình hoặc thử lại nhé.");
+      }
+    } finally {
+      // 4. Restore original image sources
+      originalSrcs.forEach((src, img) => {
+        img.src = src;
+      });
+      setIsDownloading(false);
+    }
+  }, [isDownloading]);
+
+
 
   return (
-    <div className="min-h-screen py-8 px-4 md:px-6">
-      <div className="max-w-3xl mx-auto">
-        {/* Header */}
-        <header className="bg-white rounded-2xl p-8 mb-8 relative overflow-hidden shadow-md border-2 border-slate-200/80 border-b-4 border-b-brand-gold print:hidden text-center md:text-left">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-brand-green/5 opacity-40 rounded-full -mr-20 -mt-20 border border-brand-green/10" />
-          <div className="absolute bottom-0 left-0 w-48 h-48 bg-brand-gold/5 opacity-40 rounded-full -ml-16 -mb-16" />
+    <div className="min-h-screen bg-slate-50 text-[#1A1A1A] font-sans selection:bg-brand-teal/20 relative overflow-hidden">
+      {/* Decorative Background Icons */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden opacity-[0.08] z-0">
+        <Star className="absolute top-10 left-10 text-emerald-500" size={120} />
+        <Sparkles className="absolute top-1/4 right-20 text-brand-green" size={100} />
+        <GraduationCap className="absolute bottom-20 left-1/4 text-brand-green" size={150} />
+        <Trophy className="absolute bottom-1/3 right-10 text-emerald-600" size={130} />
+        <ImageIcon className="absolute top-1/2 left-10 text-emerald-500" size={80} />
+        <Mic className="absolute top-20 right-1/3 text-emerald-600" size={110} />
+        <Star className="absolute bottom-10 right-1/4 text-emerald-500" size={90} />
+      </div>
+
+      {/* Header */}
+      <Header apiKey={apiKey} onOpenApiKeyModal={() => setShowApiKeyModal(true)} />
+
+      {/* API Key Modal */}
+      <ApiKeyModal 
+        show={showApiKeyModal} 
+        currentApiKey={apiKey} 
+        onSave={handleUpdateApiKey} 
+        onClose={() => { if (apiKey || hasEnvKey) setShowApiKeyModal(false); }} 
+        hasEnvKey={hasEnvKey}
+      />
+
+      {/* Lesson History Sidebar */}
+      <LessonHistory
+        lessons={lessonHistory.lessons}
+        show={showHistory}
+        onClose={() => setShowHistory(false)}
+        onLoadLesson={handleLoadLesson}
+        onRemoveLesson={lessonHistory.removeLesson}
+        onClearAll={lessonHistory.clearAll}
+      />
+
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-8 sm:py-12">
+        {/* Hero / Mode Selector */}
+        <div className="mb-8 sm:mb-12 flex flex-col items-center justify-center text-center space-y-6">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center">
+            <BrandLogo className="w-14 h-14 sm:w-16 sm:h-16 mb-4" />
+            <h2 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tighter uppercase mb-2"><span className="text-brand-red">Master speaking</span> <span className="text-brand-green-dark">with Nextgen AI</span></h2>
+          </motion.div>
           
-          <div className="relative z-10">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex flex-col md:flex-row items-center gap-6">
-                <div className="w-20 h-20 md:w-28 md:h-28 bg-white rounded-full border-4 border-brand-green/15 p-1.5 shadow-lg flex items-center justify-center overflow-hidden shrink-0 ring-4 ring-brand-green/5">
-                   <img src="https://i.postimg.cc/qB1tK6QH/bead166f8a480b165259.jpg" alt="Logo Nextgen English" className="w-full h-full object-contain" crossOrigin="anonymous" onError={(e) => {
-                     e.currentTarget.src = "https://ui-avatars.com/api/?name=Nextgen+English&background=119889&color=fff";
-                   }}/>
-                </div>
-                <div className="text-center md:text-left">
-                  <div className="flex items-center justify-center md:justify-start gap-2 mb-2 group">
-                     <div className="p-1.5 bg-brand-green/10 rounded-lg shadow-sm">
-                        <PenTool size={16} className="text-brand-green" />
-                     </div>
-                     <span className="text-[10px] font-black text-brand-green uppercase tracking-[0.3em] whitespace-nowrap">WriteScore AI System</span>
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 bg-slate-100/50 p-2 rounded-2xl border border-slate-200">
+            {([
+              { mode: "generate" as ContentMode, icon: "💡", label: "Chủ đề" },
+              { mode: "image" as ContentMode, icon: "🖼️", label: "Hình ảnh" },
+              { mode: "useInput" as ContentMode, icon: "📝", label: "Văn bản" },
+            ]).map(({ mode, icon, label }) => (
+              <button key={mode} onClick={() => setContentMode(mode)}
+                className={`flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-extrabold transition-all text-sm sm:text-base
+                  ${contentMode === mode ? 'bg-brand-green-dark text-white shadow-lg' : 'text-slate-700 hover:bg-slate-200'}`}
+              >
+                {icon} {label}
+              </button>
+            ))}
+
+            {/* History Button */}
+            <button onClick={() => setShowHistory(true)}
+              className="flex items-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold transition-all text-sm sm:text-base text-slate-600 hover:bg-slate-200 relative"
+            >
+              <Clock size={16} /> Lịch sử
+              {lessonHistory.lessons.length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-brand-green text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-sm">
+                  {lessonHistory.lessons.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10">
+          <InputPanel
+            topic={topic} setTopic={setTopic}
+            level={level} setLevel={setLevel}
+            contentMode={contentMode} setContentMode={setContentMode}
+            imagePreview={imagePreview} setImagePreview={setImagePreview}
+            isGenerating={isGenerating}
+            isProcessingFile={fileProcessor.isProcessingFile}
+            isDragging={fileProcessor.isDragging}
+            error={error}
+            onGenerate={handleGenerate}
+            onRetry={handleRetry}
+            onOpenApiKeyModal={() => setShowApiKeyModal(true)}
+            imageInputRef={fileProcessor.imageInputRef}
+            docFileInputRef={fileProcessor.docFileInputRef}
+            handleImageUpload={fileProcessor.handleImageUpload}
+            handleDragOver={fileProcessor.handleDragOver}
+            handleDragLeave={fileProcessor.handleDragLeave}
+            handleDrop={fileProcessor.handleDrop}
+            handlePaste={fileProcessor.handlePaste}
+            processFile={fileProcessor.processFile}
+          />
+
+          {/* Preview Panel */}
+          <div className="lg:col-span-8">
+            <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl border-4 border-brand-green/40 overflow-hidden min-h-[400px] sm:min-h-[600px] flex flex-col relative">
+              {/* Preview Header */}
+              <div className="p-3 sm:p-5 border-b-4 border-brand-green/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-brand-green/5">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-extrabold text-brand-green uppercase tracking-[0.2em] mb-1">Nội dung học tập siêu hấp dẫn</span>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-brand-green-dark rounded-full flex items-center justify-center text-white shadow-sm"><ImageIcon size={16} /></div>
+                    <span className="text-xs sm:text-sm font-extrabold text-brand-green-dark uppercase tracking-widest">Góc Học Tập Của Bé</span>
+                    {readingText && <span className="px-3 py-1 bg-brand-teal text-white text-[10px] font-black rounded-full shadow-sm uppercase">{level}</span>}
                   </div>
-                  <h1 className="text-2xl md:text-4xl font-sans font-black text-brand-gold tracking-tight whitespace-nowrap uppercase">
-                    Nextgen English
-                  </h1>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {readingText && (
+                    <button onClick={() => setShowTranslation(!showTranslation)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm
+                        ${showTranslation ? 'bg-brand-green text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    >
+                      <Languages size={14} /> {showTranslation ? 'Ẩn dịch' : 'Hiện dịch'}
+                    </button>
+                  )}
+                  {readingText && (
+                    <button onClick={downloadPoster} disabled={isDownloading}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all shadow-lg
+                        ${isDownloading ? 'bg-emerald-400 cursor-not-allowed' : 'bg-brand-green hover:bg-emerald-700 shadow-emerald-100'}`}
+                    >
+                      {isDownloading ? <RefreshCw className="animate-spin" size={14} /> : <Download size={14} />}
+                      {isDownloading ? 'Đang xử lý...' : 'Tải Poster'}
+                    </button>
+                  )}
                 </div>
               </div>
               
-              <button 
-                onClick={() => {
-                  setTempKey(apiKey);
-                  setShowKeyModal(true);
-                }}
-                className={`p-3 rounded-xl transition-all flex flex-col items-center gap-1 group shadow-sm border-2 ${!apiKey ? 'bg-red-500/10 border-red-500/30 hover:bg-red-500/25 animate-pulse' : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'}`}
-              >
-                <div className="flex items-center gap-2">
-                  <Settings size={20} className={`text-slate-600 group-hover:rotate-90 transition-transform duration-500 ${!apiKey ? 'text-red-500 animate-spin' : ''}`} style={{ animationDuration: '3s' }} />
-                  <span className="text-[10px] font-black uppercase tracking-widest hidden sm:block text-slate-700">Settings (API Key)</span>
-                </div>
-                {!apiKey ? (
-                  <span className="text-[8px] font-black text-red-500 whitespace-nowrap">Lấy API key để sử dụng app</span>
-                ) : (
-                  <span className="text-[8px] font-black text-brand-green whitespace-nowrap">API Key đã sẵn sàng</span>
-                )}
-              </button>
-            </div>
-            
-            <p className="text-brand-green font-sans text-base md:text-lg font-black tracking-wide">
-              “Learn English , Lead the way”
-            </p>
-          </div>
-        </header>
-
-        {/* API Key Modal */}
-        <AnimatePresence>
-          {showKeyModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => apiKey && setShowKeyModal(false)}
-                className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
-              />
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                className="relative w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl border border-slate-200"
-              >
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="p-3 bg-brand-green rounded-2xl text-white">
-                    <Key size={24} />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-serif font-black text-slate-900">Cấu hình Gemini API Key</h2>
-                    <p className="text-sm text-slate-500 font-medium tracking-tight whitespace-nowrap">Để bảo mật, API key được lưu trên trình duyệt của bạn.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Nhập API Key của bạn</label>
-                    <input 
-                      type="password"
-                      placeholder="AIzaSy..."
-                      className="w-full h-14 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green outline-none text-base font-bold text-slate-900 shadow-sm"
-                      value={tempKey}
-                      onChange={(e) => setTempKey(e.target.value)}
-                    />
-                  </div>
-
-                  <a 
-                    href="https://aistudio.google.com/api-keys" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-50 hover:bg-slate-100 rounded-2xl text-xs font-bold text-slate-600 transition-colors border border-slate-100 group"
-                  >
-                    <ExternalLink size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                    Chưa có Key? Lấy API Key tại Google AI Studio
-                  </a>
-
-                  <div className="flex flex-col gap-3">
-                    <button 
-                      onClick={() => handleSaveKey(tempKey)}
-                      className="w-full h-14 bg-brand-green text-white font-black rounded-2xl shadow-xl shadow-brand-green/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                    >
-                      Lưu và tiếp tục
-                    </button>
-                    {apiKey && (
-                      <button 
-                        onClick={() => setShowKeyModal(false)}
-                        className="w-full py-2 text-slate-400 font-bold text-xs hover:text-slate-600 transition-colors"
-                      >
-                        Đóng lại
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="p-4 bg-red-50 border border-red-100 rounded-2xl">
-                    <p className="text-[10px] leading-relaxed text-red-800 font-medium">
-                      * Lưu ý: Hãy giữ bí mật API key của bạn. WriteScore không lưu trữ key này trên máy chủ của chúng tôi.
-                    </p>
-                  </div>
-                </div>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence mode="wait">
-          {!result ? (
-            <motion.div 
-              key="form"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-6"
-            >
-              {/* Teacher Info */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <SectionHeader icon={User} title="Thông tin trung tâm / Giáo viên" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                      <User size={14} className="text-brand-green" />
-                      Trung tâm / Trường
-                    </label>
-                    <input 
-                      type="text" 
-                      placeholder="NEXTGEN ENGLISH"
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green focus:ring-4 focus:ring-brand-green/10 outline-none transition-all text-base font-black text-brand-green shadow-sm"
-                      value={studentInfo.center}
-                      onChange={e => setStudentInfo({ ...studentInfo, center: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                      <User size={14} className="text-brand-green" />
-                      Giáo viên phụ trách
-                    </label>
-                    <input 
-                      type="text" 
-                      placeholder="Nextgen Academic Team"
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green focus:ring-4 focus:ring-brand-green/10 outline-none transition-all text-base font-black text-brand-green shadow-sm"
-                      value={studentInfo.teacher}
-                      onChange={e => setStudentInfo({ ...studentInfo, teacher: e.target.value })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Student Info */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <SectionHeader icon={GraduationCap} title="Thông tin học sinh" />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2 md:col-span-1">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Họ và tên học sinh</label>
-                    <input 
-                      type="text" 
-                      placeholder="Nguyễn Văn A"
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green focus:ring-4 focus:ring-brand-green/10 outline-none transition-all text-base font-bold text-slate-900 shadow-sm"
-                      value={studentInfo.name}
-                      onChange={e => setStudentInfo({ ...studentInfo, name: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Lớp / Nhóm</label>
-                    <input 
-                      type="text" 
-                      placeholder="8A"
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green focus:ring-4 focus:ring-brand-green/10 outline-none transition-all text-base font-bold text-slate-900 shadow-sm"
-                      value={studentInfo.class}
-                      onChange={e => setStudentInfo({ ...studentInfo, class: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Ngày chấm bài</label>
-                    <div className="relative">
-                      <input 
-                        type="text" 
-                        readOnly
-                        className="w-full h-12 px-5 rounded-2xl border-2 border-slate-100 bg-slate-50 text-base font-bold text-slate-600 cursor-not-allowed"
-                        value={studentInfo.date}
+              {/* Content Area */}
+              <div className="flex-1 flex items-center justify-center p-2 sm:p-6 bg-[#FAFAFA] overflow-auto">
+                <AnimatePresence mode="wait">
+                  {isGenerating ? (
+                    <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-4">
+                      <div className="relative">
+                        <div className="w-20 h-20 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+                        <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-600" size={24} />
+                      </div>
+                      <p className="text-gray-500 font-medium animate-pulse text-center px-4">Gemini đang soạn bài đọc cho bạn...</p>
+                    </motion.div>
+                  ) : readingText ? (
+                    <motion.div key="result" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full flex flex-col items-center gap-4">
+                      {/* Poster */}
+                      <PosterPreview
+                        readingText={readingText}
+                        translationText={translationText} vocabulary={vocabulary}
+                        generatedTopicName={generatedTopicName} topic={topic} level={level}
+                        showTranslation={showTranslation}
+                        audioUrl={audioPlayer.audioUrl} audioRef={audioPlayer.audioRef}
+                        isPlaying={audioPlayer.isPlaying} isAudioLoading={audioPlayer.isAudioLoading}
+                        isBrowserTTS={audioPlayer.isBrowserTTS}
+                        setIsPlaying={audioPlayer.setIsPlaying} handlePlayAudio={audioPlayer.handlePlayAudio}
+                        isDownloading={isDownloading}
+                        onDownloadPoster={downloadPoster}
+                        onToggleTranslation={() => setShowTranslation(!showTranslation)}
+                        posterRef={posterRef}
                       />
-                      <Calendar size={16} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Level & Topic */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <SectionHeader icon={BookOpen} title="Trình độ & Đề bài" />
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Trình độ đăng ký (CEFR)</label>
-                    <select 
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green outline-none text-base font-bold text-slate-900 appearance-none bg-white cursor-pointer shadow-sm"
-                      value={studentInfo.level}
-                      onChange={e => setStudentInfo({ ...studentInfo, level: e.target.value })}
-                    >
-                      <optgroup label="Young Learners (YLE)">
-                        <option value="Starters">Starters (Beginner)</option>
-                        <option value="Movers">Movers (A1)</option>
-                        <option value="Flyers">Flyers (A2)</option>
-                      </optgroup>
-                      <optgroup label="CEFR Standard">
-                        <option value="A1">A1 — Elementary</option>
-                        <option value="A2">A2 — Pre-Intermediate</option>
-                        <option value="B1">B1 — Intermediate</option>
-                        <option value="B2">B2 — Upper-Intermediate</option>
-                        <option value="C1">C1 — Advanced</option>
-                      </optgroup>
-                    </select>
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-xs font-black text-slate-700 uppercase tracking-widest">Đề bài / Topic (Option)</label>
-                    <input 
-                      type="text" 
-                      placeholder="VD: Viết về sở thích cá nhân..."
-                      className="w-full h-12 px-5 rounded-2xl border-2 border-slate-200 focus:border-brand-green outline-none text-base font-medium text-slate-900 shadow-sm"
-                      value={studentInfo.topic}
-                      onChange={e => setStudentInfo({ ...studentInfo, topic: e.target.value })}
-                    />
-                  </div>
-                </div>
-              </div>
 
-              {/* Writing Area */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                   <SectionHeader icon={PenTool} title="Bài viết của học sinh" />
-                   <input 
-                    type="file" 
-                    accept="image/*" 
-                    className="hidden" 
-                    ref={fileInputRef}
-                    onChange={handleOcr}
-                   />
-                   <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={ocrLoading}
-                    className="text-[10px] uppercase font-bold text-brand-green flex items-center gap-1 hover:opacity-70 disabled:opacity-50"
-                   >
-                     {ocrLoading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} 
-                     {ocrLoading ? "Đang xử lý ảnh..." : "Tải ảnh từ bài viết"}
-                   </button>
-                </div>
-                <textarea 
-                  placeholder="Học sinh gõ hoặc dán bài viết vào đây..."
-                  className="w-full min-h-[350px] p-8 rounded-3xl border-2 border-slate-200 focus:border-brand-green focus:ring-8 focus:ring-brand-green/5 outline-none transition-all text-lg leading-relaxed resize-none font-medium text-slate-800 shadow-inner"
-                  value={essay}
-                  onChange={e => setEssay(e.target.value)}
-                />
-                
-                {error && (
-                  <div className="mt-4 p-3 rounded-lg bg-red-50 text-red-600 text-xs flex items-center gap-2 border border-red-100 animate-in fade-in slide-in-from-top-2">
-                    <AlertCircle size={14} />
-                    {error}
-                  </div>
-                )}
-              </div>
 
-              <button 
-                onClick={handleGrade}
-                className="w-full h-16 bg-brand-green hover:bg-brand-green-dark text-white font-black text-lg uppercase tracking-widest rounded-3xl shadow-2xl shadow-brand-green/40 flex items-center justify-center gap-3 transition-all group active:scale-[0.98]"
-              >
-                <div className="bg-white/20 p-2 rounded-xl">
-                  <Send size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-                </div>
-                Chấm bài ngay
-              </button>
-            </motion.div>
-          ) : (
-            <motion.div 
-              key="result"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="space-y-6"
-            >
-              <div className="flex justify-between items-center print:hidden px-4">
-                 <button 
-                  onClick={reset}
-                  className="text-slate-500 font-bold text-sm flex items-center gap-2 hover:text-brand-green transition-colors"
-                >
-                  <ArrowLeft size={16} /> Chấm bài mới
-                </button>
-                <div className="flex gap-2">
-                   <button 
-                    onClick={exportImage}
-                    disabled={exporting}
-                    className="h-10 px-4 bg-slate-100 text-slate-600 font-bold rounded-lg flex items-center gap-2 text-xs hover:bg-slate-200 disabled:opacity-50"
-                  >
-                    {exporting ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />} 
-                    Lưu hình ảnh
-                  </button>
-                  <button 
-                    onClick={() => window.print()}
-                    className="h-10 px-4 bg-brand-green text-white font-bold rounded-lg flex items-center gap-2 text-xs shadow-sm"
-                  >
-                    <Printer size={14} /> In kết quả
-                  </button>
-                </div>
-              </div>
+                      {/* Speech Evaluator */}
+                      <SpeechEvaluator
+                        readingText={readingText}
+                        isRecording={recorder.isRecording}
+                        isEvaluating={recorder.isEvaluating}
+                        evaluation={recorder.evaluation}
+                        studentName={studentName} teacherName={teacherName}
+                        setStudentName={setStudentName} setTeacherName={setTeacherName}
+                        startRecording={recorder.startRecording}
+                        stopRecording={recorder.stopRecording}
+                        onShowCertificate={() => setShowCertificate(true)}
+                        isExerciseCompleted={exerciseScore !== null}
+                      />
 
-              {/* Result Summary */}
-              <div ref={resultRef} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl">
-                <div className="bg-slate-50 p-6 md:p-8 relative border-b-4 border-brand-gold">
-                  <div className="absolute top-0 right-0 w-48 h-48 bg-brand-green/5 rounded-full -mr-24 -mt-24 border border-brand-green/10" />
-                  <div className="absolute bottom-0 left-0 w-32 h-32 bg-brand-gold/5 rounded-full -ml-16 -mb-16" />
-                  
-                  <div className="relative z-10 flex flex-col md:flex-row justify-between items-center md:items-center gap-6">
-                    <div className="text-center md:text-left flex flex-col items-center md:items-start">
-                      <div className="w-14 h-14 bg-white rounded-full p-1 border border-slate-200/80 shadow-md mb-2 flex items-center justify-center overflow-hidden">
-                        <img src="https://i.postimg.cc/qB1tK6QH/bead166f8a480b165259.jpg" alt="Logo Result" className="w-full h-full object-contain" crossOrigin="anonymous" />
-                      </div>
-                      <h2 className="text-xl md:text-2xl font-sans font-black mb-1 text-brand-gold uppercase tracking-tight">{studentInfo.name || "Học sinh"}</h2>
-                      <div className="space-y-1.5 text-xs text-slate-700">
-                        <div className="flex items-center justify-center md:justify-start gap-2">
-                           <GraduationCap size={14} className="text-brand-green shrink-0" />
-                           <div className="flex items-center gap-1.5">
-                             <span className="uppercase tracking-widest text-[8px] font-black opacity-90 text-slate-400 decoration-brand-green underline decoration-1 underline-offset-2">Center:</span>
-                             <span className="font-bold text-slate-800">{studentInfo.center || "Nextgen English"}</span>
-                           </div>
-                        </div>
-                        <div className="flex items-center justify-center md:justify-start gap-2">
-                           <BookOpen size={14} className="text-brand-green shrink-0" />
-                           <div className="flex items-center gap-1.5">
-                             <span className="uppercase tracking-widest text-[8px] font-black opacity-90 text-slate-400 decoration-brand-green underline decoration-1 underline-offset-2">Topic:</span>
-                             <span className="font-bold text-slate-800 line-clamp-1 truncate max-w-[200px]">{studentInfo.topic || "General Writing"}</span>
-                           </div>
-                        </div>
-                        <div className="flex items-center justify-center md:justify-start gap-2">
-                           <Calendar size={14} className="text-brand-green shrink-0" />
-                           <div className="flex items-center gap-1.5">
-                             <span className="uppercase tracking-widest text-[8px] font-black opacity-90 text-slate-400 decoration-brand-green underline decoration-1 underline-offset-2">Date:</span>
-                             <span className="font-bold text-slate-800">{studentInfo.date}</span>
-                           </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-center md:text-right bg-white p-4 rounded-xl border border-slate-200/80 shadow-md min-w-[130px]">
-                      <div className="text-[8px] font-black text-brand-green uppercase tracking-[0.3em] mb-1">Final Score</div>
-                      <div className="flex items-baseline justify-center md:justify-end gap-1 mb-1">
-                        <span className="text-4xl md:text-5xl font-sans font-black text-brand-gold leading-none">{result.total.toFixed(1)}</span>
-                        <span className="text-base text-slate-400 font-bold">/10</span>
-                      </div>
-                      <div className="scale-75 origin-center md:origin-right transform">
-                        <GradePill score={result.total} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-8 md:p-10">
-                  {/* CEFR Level Box */}
-                  <div className="bg-brand-gold-light border-2 border-brand-green/20 rounded-3xl p-6 md:p-8 mb-10 relative overflow-hidden group hover:border-brand-green/30 transition-colors">
-                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:scale-110 transition-transform">
-                       <CheckCircle2 size={120} className="text-brand-green" />
-                    </div>
-                    <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
-                      <div className="w-16 h-16 shrink-0 rounded-xl bg-white border-4 border-brand-gold flex items-center justify-center text-lg sm:text-xl font-sans font-black text-brand-gold shadow-lg">
-                        {result.demonstrated_cefr}
-                      </div>
-                      <div className="text-center md:text-left">
-                        <div className="text-xs font-black text-brand-green uppercase tracking-[0.2em] mb-2">Trình độ thực tế (Practical Assessment)</div>
-                        <p className="text-lg text-slate-800 leading-relaxed font-sans italic font-medium">
-                          "{result.cefr_comment}"
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <SectionHeader icon={Trophy} title="Điểm thành phần (Chuẩn CEFR)" />
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
-                    <ScoreBox label="Nhiệm vụ" score={result.task_achievement.score} />
-                    <ScoreBox label="Ngữ pháp" score={result.grammar.score} />
-                    <ScoreBox label="Từ vựng" score={result.vocabulary.score} />
-                    <ScoreBox label="Mạch lạc" score={result.coherence.score} />
-                    <ScoreBox label="Chính tả" score={result.spelling.score} />
-                  </div>
-
-                  <SectionHeader icon={ShieldCheck} title="Phân tích bài viết & Sửa lỗi (Essay Correction)" />
-                  <div className="bg-slate-50 border-2 border-slate-200 rounded-3xl p-6 md:p-8 mb-10 shadow-inner">
-                    <div className="flex items-center gap-2 mb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                       <AlertCircle size={14} className="text-red-400" /> 
-                       Di chuột vào chữ màu đỏ để xem giải thích lỗi sai
-                    </div>
-                    <EssayCorrector essay={essay} errors={result.identified_errors || []} />
-                  </div>
-
-                  <SectionHeader icon={CheckCircle2} title="Nhận xét chi tiết (Detailed Analytics)" />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
-                    {[
-                      { l: 'Task Achievement', f: result.task_achievement.feedback, s: result.task_achievement.score, icon: Target },
-                      { l: 'Grammar', f: result.grammar.feedback, s: result.grammar.score, icon: ShieldCheck },
-                      { l: 'Vocabulary', f: result.vocabulary.feedback, s: result.vocabulary.score, icon: Languages },
-                      { l: 'Coherence', f: result.coherence.feedback, s: result.coherence.score, icon: GitMerge },
-                      { l: 'Spelling', f: result.spelling.feedback, s: result.spelling.score, icon: SpellCheck },
-                    ].map((item, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all border-t-4 border-t-brand-green group">
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="flex items-center gap-2.5">
-                             <item.icon size={18} className="text-brand-green group-hover:scale-110 transition-transform" />
-                             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">{item.l}</h4>
+                      {/* Exercise Section */}
+                      {!exerciseData ? (
+                        <div className="w-full max-w-[800px] p-6 bg-amber-50/75 rounded-2xl border-2 border-dashed border-amber-200 flex flex-col items-center justify-center text-center space-y-3">
+                          <span className="text-2xl">📝</span>
+                          <div>
+                            <h4 className="font-bold text-amber-900 text-sm sm:text-base">Bài học chưa có phần bài tập</h4>
+                            <p className="text-xs text-amber-700/80 mt-1 max-w-md">Do kết nối mạng hoặc quá tải hệ thống từ Google. Bạn hãy nhấn nút dưới đây để tạo bài tập ngay nhé!</p>
                           </div>
-                          <div className="bg-brand-green/10 px-3 py-1 rounded-full">
-                             <span className="text-sm font-serif font-bold text-brand-green">{item.s.toFixed(1)}<span className="opacity-40 text-xs">/2.0</span></span>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!readingText) return;
+                              setIsGenerating(true);
+                              setError(null);
+                              try {
+                                const exData = await generateExercise(readingText, level);
+                                setExerciseData(exData);
+                                // Save to lesson history
+                                if (currentLessonId) {
+                                  lessonHistory.updateExerciseData(currentLessonId, exData);
+                                }
+                              } catch (err: any) {
+                                console.error(err);
+                                setError("Không thể tạo bài tập lúc này. Vui lòng kiểm tra lại khóa API và thử lại sau.");
+                              } finally {
+                                setIsGenerating(false);
+                              }
+                            }}
+                            disabled={isGenerating}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 active:scale-95 text-white rounded-xl text-xs sm:text-sm font-bold shadow-md transition-all"
+                          >
+                            <RefreshCw className={isGenerating ? "animate-spin" : ""} size={14} />
+                            Tạo phần bài tập
+                          </button>
                         </div>
-                        <p className="text-sm text-slate-800 leading-relaxed font-normal">{item.f}</p>
-                      </div>
-                    ))}
-                  </div>
+                      ) : (
+                        <ExerciseSection 
+                          exerciseData={exerciseData} 
+                          savedScore={exerciseScore} 
+                          onComplete={handleExerciseComplete} 
+                        />
+                      )}
 
-                  <SectionHeader icon={Activity} title="Lộ trình nâng cao trình độ" />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5">
-                      <h4 className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-3">Kỹ năng cần luyện tập</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {result.skills_to_practise.map((s, idx) => (
-                          <span key={idx} className="px-3 py-1 bg-white border border-amber-200 rounded-lg text-xs text-amber-900 font-medium">{s}</span>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5">
-                      <h4 className="text-xs font-bold text-indigo-800 uppercase tracking-widest mb-3">Chủ đề nên bổ trợ</h4>
-                      <div className="flex flex-wrap gap-2">
-                        {result.topics_to_study.map((t, idx) => (
-                          <span key={idx} className="px-3 py-1 bg-white border border-indigo-200 rounded-lg text-xs text-indigo-900 font-medium">{t}</span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                      {/* Certificate Modal */}
+                      <CertificateModal
+                        show={showCertificate} onClose={() => setShowCertificate(false)}
+                        evaluation={recorder.evaluation}
+                        studentName={studentName} teacherName={teacherName}
+                        generatedTopicName={generatedTopicName} topic={topic} level={level}
+                        isDownloading={isDownloading} setIsDownloading={setIsDownloading} setError={setError}
+                        exerciseScore={exerciseScore}
+                      />
 
-                  <SectionHeader icon={FileText} title="Bài viết mẫu gợi ý (Model Essay)" />
-                  <div className="bg-white border-2 border-brand-green/25 rounded-3xl p-8 md:p-10 relative overflow-hidden shadow-lg">
-                    <div className="absolute top-0 right-0 p-4 opacity-[0.03] text-brand-green">
-                       <FileText size={80} />
-                    </div>
-                    <div className="relative z-10">
-                      <div className="inline-block px-4 py-1.5 bg-brand-gold text-white text-xs font-black rounded-full uppercase tracking-widest mb-6 shadow-md shadow-brand-gold/20">High Quality Sample</div>
-                      <div className="text-base md:text-lg leading-relaxed font-serif italic text-slate-800 font-medium">
-                        {result.improved_essay.split('\n').map((line, i) => (
-                          <React.Fragment key={i}>
-                            {line}
-                            <br />
-                          </React.Fragment>
-                        ))}
+                      {/* AI Prompt Debug */}
+                      {generatedPrompt && (
+                        <div className="w-full max-w-[600px] p-4 bg-emerald-50/50 rounded-xl border border-emerald-100/50">
+                          <p className="text-[10px] uppercase font-bold text-emerald-400 mb-1 tracking-widest">AI Prompt</p>
+                          <p className="text-xs text-emerald-900/70 italic leading-relaxed">{generatedPrompt}</p>
+                        </div>
+                      )}
+                    </motion.div>
+                  ) : (
+                    <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center space-y-4 max-w-xs">
+                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto text-gray-300"><ImageIcon size={40} /></div>
+                      <div className="space-y-2">
+                        <h3 className="font-bold text-gray-700">Chưa có Poster nào</h3>
+                        <p className="text-sm text-gray-400">Chọn trình độ, nhập chủ đề và nhấn nút tạo để bắt đầu!</p>
                       </div>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-8 pt-8 border-t border-slate-100 text-center text-[10px] text-slate-400 uppercase tracking-[0.2em]">
-                    WriteScore AI · Powered by Gemini · CEFR Standard
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <footer className="mt-16 bg-white border border-slate-200 rounded-3xl p-6 md:p-8 text-slate-800 shadow-lg relative overflow-hidden print:hidden border-t-8 border-t-brand-gold font-sans">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-brand-gold/5 opacity-20 rounded-full -mr-32 -mt-32" />
-          
-          <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10">
-            {/* Brand */}
-            <div className="text-center md:text-left">
-              <div className="w-16 h-16 md:w-20 md:h-20 bg-white rounded-full p-1 mb-4 mx-auto md:mx-0 flex items-center justify-center overflow-hidden border border-slate-200/80 shadow-md ring-4 ring-slate-100">
-                 <img src="https://i.postimg.cc/qB1tK6QH/bead166f8a480b165259.jpg" alt="Logo Footer" className="w-full h-full object-contain" crossOrigin="anonymous" />
-              </div>
-              <h2 className="text-lg font-sans font-black text-brand-gold mb-1 uppercase tracking-wide whitespace-nowrap">Nextgen English</h2>
-              <p className="text-xs text-brand-green font-black mb-2 slide-in-from-left italic">“Learn English , Lead the way”</p>
-            </div>
- 
-            {/* Contact */}
-            <div className="md:col-span-2">
-              <h3 className="text-xs font-black text-brand-gold uppercase tracking-[0.2em] mb-4 border-b-2 border-slate-100 pb-2">Liên hệ với chúng tôi</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 text-left">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-brand-green/10 rounded-lg text-brand-green mt-1 shadow-sm">
-                    <Activity size={14} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-brand-green uppercase font-black tracking-widest mb-0.5">Địa chỉ</div>
-                    <p className="text-sm text-brand-green-dark font-extrabold leading-tight">Số 68 Nguyễn Bình, Thanh Sơn, Uông Bí, Quảng Ninh.</p>
-                  </div>
-                </div>
-                
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-brand-green/10 rounded-lg text-brand-green mt-1 shadow-sm">
-                    <User size={14} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-brand-green uppercase font-black tracking-widest mb-0.5">Hotline</div>
-                    <p className="text-sm text-brand-green-dark font-extrabold">Hotline: 038 920 8990</p>
-                  </div>
-                </div>
- 
-                <div className="flex items-start gap-3 overflow-hidden">
-                  <div className="p-2 bg-brand-green/10 rounded-lg text-brand-green mt-1 shadow-sm shrink-0">
-                    <FileText size={14} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[10px] text-brand-green uppercase font-black tracking-widest mb-0.5">Email</div>
-                    <a href="mailto:nextgenuongbi@gmail.com" className="text-sm text-brand-green-dark hover:text-brand-green font-extrabold break-words leading-tight underline decoration-brand-green/30 underline-offset-4 transition-colors">nextgenuongbi@gmail.com</a>
-                  </div>
-                </div>
- 
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-brand-green/10 rounded-lg text-brand-green mt-1 shadow-sm">
-                    <Send size={14} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-brand-green uppercase font-black tracking-widest mb-0.5">Fanpage</div>
-                    <a href="https://www.facebook.com/people/Trung-T%C3%A2m-Ngoa%CC%A3i-Ng%C6%B0%CC%83-Nextgen-U%C3%B4ng-Bi%CC%81/61575042515566/" target="_blank" rel="noopener noreferrer" className="text-sm text-brand-green hover:text-brand-green-dark font-extrabold transition-colors duration-250 underline decoration-brand-green/40 underline-offset-4">Trung Tâm Ngoại Ngữ Nextgen Uông Bí</a>
-                  </div>
-                </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
-          
-          <div className="mt-8 pt-4 border-t border-slate-100 text-center">
-             <p className="text-[9px] text-slate-400 uppercase tracking-[0.3em] font-medium">
-               © {new Date().getFullYear()} Nextgen English · Learn English . Lead the way
-             </p>
-          </div>
-        </footer>
-      </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }

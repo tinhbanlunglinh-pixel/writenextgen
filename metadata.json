@@ -1,6 +1,8 @@
 {
-  "name": "WriteScore AI nextgen",
-  "description": "Hệ thống chấm điểm bài viết tiếng Anh chuẩn CEFR của Trung tâm nextgen, hỗ trợ đánh giá 5 tiêu chí chi tiết.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Nextgen English - Speaking Practice",
+  "description": "Ứng dụng luyện nói Tiếng Anh - Trung Tâm Ngoại Ngữ Nextgen Uông Bí. Learn English, Lead the way.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": []
 }
