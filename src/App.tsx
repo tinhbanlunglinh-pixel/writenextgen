@@ -301,10 +301,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen py-8 px-4 md:px-6">
-      <div className="max-w-3xl mx-auto">
+    <div className="min-h-screen py-8 px-4 md:px-6 bg-[#f7faf8]">
+      <div className="max-w-3xl mx-auto" ref={resultRef}>
         {/* Header */}
-        <header className="bg-brand-green rounded-2xl p-8 mb-8 relative overflow-hidden shadow-md print:hidden text-center md:text-left">
+        <header className="bg-brand-green rounded-2xl p-8 mb-8 relative overflow-hidden shadow-md text-center md:text-left">
           <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 opacity-40 rounded-full -mr-20 -mt-20 border border-white/10" />
           <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 opacity-40 rounded-full -ml-16 -mb-16" />
           
@@ -330,6 +330,7 @@ export default function App() {
               </div>
               
               <button 
+                data-html2canvas-ignore="true"
                 onClick={() => {
                   setTempKey(apiKey);
                   setShowKeyModal(true);
@@ -602,7 +603,7 @@ export default function App() {
               animate={{ opacity: 1, scale: 1 }}
               className="space-y-6"
             >
-              <div className="flex justify-between items-center print:hidden px-4">
+              <div data-html2canvas-ignore="true" className="flex justify-between items-center print:hidden px-4 mb-4">
                  <button 
                   onClick={reset}
                   className="text-slate-500 font-bold text-sm flex items-center gap-2 hover:text-brand-green transition-colors"
@@ -628,7 +629,7 @@ export default function App() {
               </div>
 
               {/* Result Summary */}
-              <div ref={resultRef} className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl">
+              <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-xl">
                 <div className="bg-slate-50 p-6 md:p-8 relative border-b-4 border-brand-gold">
                   <div className="absolute top-0 right-0 w-48 h-48 bg-brand-green/5 rounded-full -mr-24 -mt-24 border border-brand-green/10" />
                   <div className="absolute bottom-0 left-0 w-32 h-32 bg-brand-gold/5 rounded-full -ml-16 -mb-16" />
@@ -784,7 +785,7 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <footer className="mt-16 bg-white border border-slate-200 rounded-3xl p-6 md:p-8 text-slate-800 shadow-lg relative overflow-hidden print:hidden border-t-8 border-t-brand-gold font-sans">
+        <footer className="mt-16 bg-white border border-slate-200 rounded-3xl p-6 md:p-8 text-slate-800 shadow-lg relative overflow-hidden border-t-8 border-t-brand-gold font-sans">
           <div className="absolute top-0 right-0 w-64 h-64 bg-brand-gold/5 opacity-20 rounded-full -mr-32 -mt-32" />
           
           <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10">
